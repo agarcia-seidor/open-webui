@@ -147,12 +147,12 @@
 			{/if}
 
 			{#if help}
-				<hr class=" border-gray-50 dark:border-gray-800 my-1 p-0" />
+				<!-- <hr class=" border-gray-50 dark:border-gray-800 my-1 p-0" /> -->
 
 				<!-- {$i18n.t('Help')} -->
 
 				{#if $user?.role === 'admin'}
-					<DropdownMenu.Item
+					<!-- <DropdownMenu.Item
 						as="a"
 						target="_blank"
 						class="flex gap-2 items-center py-1.5 px-3 text-sm select-none w-full cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition"
@@ -164,10 +164,10 @@
 					>
 						<QuestionMarkCircle className="size-5" />
 						<div class="flex items-center">{$i18n.t('Documentation')}</div>
-					</DropdownMenu.Item>
+					</DropdownMenu.Item> -->
 
 					<!-- Releases -->
-					<DropdownMenu.Item
+					<!-- <DropdownMenu.Item
 						as="a"
 						target="_blank"
 						class="flex gap-2 items-center py-1.5 px-3 text-sm select-none w-full cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition"
@@ -179,10 +179,10 @@
 					>
 						<Map className="size-5" />
 						<div class="flex items-center">{$i18n.t('Releases')}</div>
-					</DropdownMenu.Item>
+					</DropdownMenu.Item> -->
 				{/if}
 
-				<DropdownMenu.Item
+				<!-- <DropdownMenu.Item
 					class="flex gap-2 items-center py-1.5 px-3 text-sm select-none w-full  hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition cursor-pointer"
 					id="chat-share-button"
 					on:click={async () => {
@@ -197,7 +197,7 @@
 				>
 					<Keyboard className="size-5" />
 					<div class="flex items-center">{$i18n.t('Keyboard shortcuts')}</div>
-				</DropdownMenu.Item>
+				</DropdownMenu.Item> -->
 			{/if}
 
 			<hr class=" border-gray-50 dark:border-gray-800 my-1 p-0" />
@@ -219,7 +219,7 @@
 				<div class=" self-center truncate">{$i18n.t('Sign Out')}</div>
 			</DropdownMenu.Item>
 
-			{#if usage}
+			<!-- {#if usage}
 				{#if usage?.user_ids?.length > 0}
 					<hr class=" border-gray-50 dark:border-gray-800 my-1 p-0" />
 
@@ -254,7 +254,7 @@
 						</div>
 					</Tooltip>
 				{/if}
-			{/if}
+			{/if} -->
 
 			<!-- <DropdownMenu.Item class="flex items-center py-1.5 px-3 text-sm ">
 				<div class="flex items-center">Profile</div>
