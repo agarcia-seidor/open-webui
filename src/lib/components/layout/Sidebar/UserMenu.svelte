@@ -200,7 +200,7 @@
 				</DropdownMenu.Item> -->
 			{/if}
 
-			<hr class=" border-gray-50 dark:border-gray-800 my-1 p-0" />
+			<!-- <hr class=" border-gray-50 dark:border-gray-800 my-1 p-0" />
 
 			<DropdownMenu.Item
 				class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
@@ -217,9 +217,9 @@
 					<SignOut className="w-5 h-5" strokeWidth="1.5" />
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Sign Out')}</div>
-			</DropdownMenu.Item>
-
-			<!-- {#if usage}
+			</DropdownMenu.Item> -->
+		{#if $user?.role === 'admin'}
+			{#if usage}
 				{#if usage?.user_ids?.length > 0}
 					<hr class=" border-gray-50 dark:border-gray-800 my-1 p-0" />
 
@@ -254,7 +254,8 @@
 						</div>
 					</Tooltip>
 				{/if}
-			{/if} -->
+			{/if}
+		{/if}
 
 			<!-- <DropdownMenu.Item class="flex items-center py-1.5 px-3 text-sm ">
 				<div class="flex items-center">Profile</div>

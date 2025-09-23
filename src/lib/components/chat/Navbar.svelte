@@ -217,7 +217,7 @@
 					{/if}
 
 					{#if $user !== undefined && $user !== null}
-						<UserMenu
+						<!-- <UserMenu
 							className="max-w-[240px]"
 							role={$user?.role}
 							help={true}
@@ -240,7 +240,7 @@
 									/>
 								</div>
 							</div>
-						</UserMenu>
+						</UserMenu> -->
 					{/if}
 				</div>
 			</div>
