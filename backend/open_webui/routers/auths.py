@@ -17,7 +17,7 @@ from open_webui.models.auths import (
     UpdatePasswordForm,
     UserResponse,
 )
-from open_webui.models.users import Users, UpdateProfileForm
+from open_webui.models.users import Users, UpdateProfileForm, UserModel
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
 
@@ -78,6 +78,125 @@ class SessionUserInfoResponse(SessionUserResponse):
     bio: Optional[str] = None
     gender: Optional[str] = None
     date_of_birth: Optional[datetime.date] = None
+
+
+def _issue_session_response(request: Request, response: Response, user: UserModel):
+    if not user:
+        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+
+    expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+    expires_at = None
+    if expires_delta:
+        expires_at = int(time.time()) + int(expires_delta.total_seconds())
+
+    token = create_token(
+        data={"id": user.id},
+        expires_delta=expires_delta,
+    )
+
+    datetime_expires_at = (
+        datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
+        if expires_at
+        else None
+    )
+
+    response.set_cookie(
+        key="token",
+        value=token,
+        expires=datetime_expires_at,
+        httponly=True,
+        samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+        secure=WEBUI_AUTH_COOKIE_SECURE,
+    )
+
+    user_permissions = get_permissions(
+        user.id, request.app.state.config.USER_PERMISSIONS
+    )
+
+    return {
+        "token": token,
+        "token_type": "Bearer",
+        "expires_at": expires_at,
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "profile_image_url": user.profile_image_url,
+        "permissions": user_permissions,
+    }
+
+
+async def _handle_trusted_header_signin(request: Request, response: Response):
+    header_email = request.app.state.AUTH_TRUSTED_EMAIL_HEADER
+    if not header_email:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
+        )
+
+    email_value = request.headers.get(header_email)
+    if not email_value:
+        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_TRUSTED_HEADER)
+
+    email = email_value.lower()
+
+    header_name = request.app.state.AUTH_TRUSTED_NAME_HEADER
+    name = request.headers.get(header_name, email) if header_name else email
+
+    had_users = Users.has_users()
+    user = Users.get_user_by_email(email)
+    created_user = False
+
+    if not user:
+        random_password = str(uuid.uuid4())
+        hashed = get_password_hash(random_password)
+        role = (
+            "admin"
+            if not had_users
+            else request.app.state.config.DEFAULT_USER_ROLE
+        )
+        user = Auths.insert_new_auth(
+            email,
+            hashed,
+            name,
+            "/user.png",
+            role,
+        )
+        created_user = True
+    else:
+        if name and user.name != name:
+            updated_user = Users.update_user_by_id(user.id, {"name": name})
+            if updated_user:
+                user = updated_user
+
+    header_groups = request.app.state.AUTH_TRUSTED_GROUPS_HEADER
+    if header_groups and user and user.role != "admin":
+        group_names = request.headers.get(header_groups, "")
+        if group_names:
+            parsed_groups = [g.strip() for g in group_names.split(",") if g.strip()]
+            if parsed_groups:
+                try:
+                    Groups.sync_groups_by_group_names(user.id, parsed_groups)
+                except Exception as e:
+                    log.error(f"Failed to sync groups for user {user.id}: {e}")
+
+    if created_user:
+        if not had_users:
+            request.app.state.config.ENABLE_SIGNUP = False
+
+        if request.app.state.config.WEBHOOK_URL:
+            message = WEBHOOK_MESSAGES.USER_SIGNUP(user.name)
+            await post_webhook(
+                request.app.state.WEBUI_NAME,
+                request.app.state.config.WEBHOOK_URL,
+                message,
+                {
+                    "action": "signup",
+                    "message": message,
+                    "user": user.model_dump_json(exclude_none=True),
+                },
+            )
+
+    return _issue_session_response(request, response, user)
 
 
 @router.get("/", response_model=SessionUserInfoResponse)
@@ -463,34 +582,10 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
 
 @router.post("/signin", response_model=SessionUserResponse)
 async def signin(request: Request, response: Response, form_data: SigninForm):
-    if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
-        if WEBUI_AUTH_TRUSTED_EMAIL_HEADER not in request.headers:
-            raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_TRUSTED_HEADER)
+    if request.app.state.AUTH_TRUSTED_EMAIL_HEADER:
+        return await _handle_trusted_header_signin(request, response)
 
-        email = request.headers[WEBUI_AUTH_TRUSTED_EMAIL_HEADER].lower()
-        name = email
-
-        if WEBUI_AUTH_TRUSTED_NAME_HEADER:
-            name = request.headers.get(WEBUI_AUTH_TRUSTED_NAME_HEADER, email)
-
-        if not Users.get_user_by_email(email.lower()):
-            await signup(
-                request,
-                response,
-                SignupForm(email=email, password=str(uuid.uuid4()), name=name),
-            )
-
-        user = Auths.authenticate_user_by_email(email)
-        if WEBUI_AUTH_TRUSTED_GROUPS_HEADER and user and user.role != "admin":
-            group_names = request.headers.get(
-                WEBUI_AUTH_TRUSTED_GROUPS_HEADER, ""
-            ).split(",")
-            group_names = [name.strip() for name in group_names if name.strip()]
-
-            if group_names:
-                Groups.sync_groups_by_group_names(user.id, group_names)
-
-    elif WEBUI_AUTH == False:
+    if WEBUI_AUTH == False:
         admin_email = "admin@localhost"
         admin_password = "admin"
 
@@ -511,50 +606,14 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
         user = Auths.authenticate_user(form_data.email.lower(), form_data.password)
 
     if user:
+        return _issue_session_response(request, response, user)
 
-        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
-        expires_at = None
-        if expires_delta:
-            expires_at = int(time.time()) + int(expires_delta.total_seconds())
+    raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
-        token = create_token(
-            data={"id": user.id},
-            expires_delta=expires_delta,
-        )
 
-        datetime_expires_at = (
-            datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
-            if expires_at
-            else None
-        )
-
-        # Set the cookie token
-        response.set_cookie(
-            key="token",
-            value=token,
-            expires=datetime_expires_at,
-            httponly=True,  # Ensures the cookie is not accessible via JavaScript
-            samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
-            secure=WEBUI_AUTH_COOKIE_SECURE,
-        )
-
-        user_permissions = get_permissions(
-            user.id, request.app.state.config.USER_PERMISSIONS
-        )
-
-        return {
-            "token": token,
-            "token_type": "Bearer",
-            "expires_at": expires_at,
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            "profile_image_url": user.profile_image_url,
-            "permissions": user_permissions,
-        }
-    else:
-        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+@router.post("/delegate", response_model=SessionUserResponse)
+async def delegated_signin(request: Request, response: Response):
+    return await _handle_trusted_header_signin(request, response)
 
 
 ############################
@@ -564,6 +623,11 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
 
 @router.post("/signup", response_model=SessionUserResponse)
 async def signup(request: Request, response: Response, form_data: SignupForm):
+    if request.app.state.AUTH_TRUSTED_EMAIL_HEADER:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
+        )
+
     has_users = Users.has_users()
 
     if WEBUI_AUTH:
@@ -609,32 +673,6 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
         )
 
         if user:
-            expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
-            expires_at = None
-            if expires_delta:
-                expires_at = int(time.time()) + int(expires_delta.total_seconds())
-
-            token = create_token(
-                data={"id": user.id},
-                expires_delta=expires_delta,
-            )
-
-            datetime_expires_at = (
-                datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
-                if expires_at
-                else None
-            )
-
-            # Set the cookie token
-            response.set_cookie(
-                key="token",
-                value=token,
-                expires=datetime_expires_at,
-                httponly=True,  # Ensures the cookie is not accessible via JavaScript
-                samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
-                secure=WEBUI_AUTH_COOKIE_SECURE,
-            )
-
             if request.app.state.config.WEBHOOK_URL:
                 await post_webhook(
                     request.app.state.WEBUI_NAME,
@@ -647,25 +685,11 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
                     },
                 )
 
-            user_permissions = get_permissions(
-                user.id, request.app.state.config.USER_PERMISSIONS
-            )
-
             if not has_users:
                 # Disable signup after the first user is created
                 request.app.state.config.ENABLE_SIGNUP = False
 
-            return {
-                "token": token,
-                "token_type": "Bearer",
-                "expires_at": expires_at,
-                "id": user.id,
-                "email": user.email,
-                "name": user.name,
-                "role": user.role,
-                "profile_image_url": user.profile_image_url,
-                "permissions": user_permissions,
-            }
+            return _issue_session_response(request, response, user)
         else:
             raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
     except Exception as err:

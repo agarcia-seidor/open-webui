@@ -9,7 +9,13 @@
 	import { page } from '$app/stores';
 
 	import { getBackendConfig } from '$lib/apis';
-	import { ldapUserSignIn, getSessionUser, userSignIn, userSignUp } from '$lib/apis/auths';
+	import {
+		ldapUserSignIn,
+		getSessionUser,
+		userSignIn,
+		userSignUp,
+		delegatedSignIn
+	} from '$lib/apis/auths';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
@@ -57,10 +63,19 @@
 	};
 
 	const signInHandler = async () => {
-		const sessionUser = await userSignIn(email, password).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
+		let sessionUser = null;
+
+		if ($config?.features.auth_trusted_header ?? false) {
+			sessionUser = await delegatedSignIn().catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
+		} else {
+			sessionUser = await userSignIn(email, password).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
+		}
 
 		await setSessionUser(sessionUser);
 	};
